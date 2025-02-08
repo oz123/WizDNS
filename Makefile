@@ -11,8 +11,31 @@ ifndef target
 	@(which mh > /dev/null 2>&1 && echo -e "\nUse \`make help target=foo\` to learn more about foo.")
 endif
 
+
+
+CC = gcc
+CFLAGS = -Wall -Wextra -g $(shell pkg-config --cflags gio-2.0)
+LDFLAGS = $(shell pkg-config --libs gio-2.0)
+
 VERSION ?= $(shell git describe --always)#? version
 
+SRCDIR = src
+OBJDIR = obj
 
-wizdns:  ## build wizdns
-	gcc src/main.c -o wizdns `pkg-config --cflags --libs gio-2.0`
+$(OBJDIR):
+	mkdir -p $@
+
+SOURCES = $(SRCDIR)/main.c $(SRCDIR)/handler.c
+OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+
+$(TARGET): $(OBJECTS)
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+wizdns:  $(OBJDIR) $(OBJECTS) ## build wizdns
+	$(CC) $(OBJECTS) $(LDFLAGS) -o $@
+
+clean: ## clean build artifacts
+	rm -rf $(OBJDIR) wizdns
