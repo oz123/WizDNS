@@ -1,71 +1,58 @@
 #include "handler.h"
+#include <ldns/ldns.h>
+
 #include <stdio.h>
 #include <string.h>
 
-gboolean parse_dns_query(const guint8 *buffer, gsize len,
-                              DnsHeader *header, DnsQuestion *question) {
-    // Check minimum buffer size
-    if (len < sizeof(DnsHeader)) {
+gboolean parse_dns_query(const guint8 *buffer, gsize len, DnsHeader *header, DnsQuestion *question) {
+    ldns_status status;
+    ldns_pkt *pkt;
+    
+    // Parse the entire packet at once
+    status = ldns_wire2pkt(&pkt, buffer, len);
+    if (status != LDNS_STATUS_OK) {
+        g_print("Failed to parse DNS packet: %s\n", ldns_get_errorstr_by_id(status));
         return FALSE;
     }
 
-    // Parse header
-    const guint8 *ptr = buffer;
+    // Extract header information
+    header->id = ldns_pkt_id(pkt);
     
-    // Transaction ID
-    header->id = ((ptr[0] << 8) | ptr[1]);
+    // Calculate flags step by step
+    guint16 flags = 0;
+    flags |= ((guint16)ldns_pkt_qr(pkt)) << 15;
+    flags |= ((guint16)ldns_pkt_get_opcode(pkt)) << 11;
+    flags |= ((guint16)ldns_pkt_aa(pkt)) << 10;
+    flags |= ((guint16)ldns_pkt_tc(pkt)) << 9;
+    flags |= ((guint16)ldns_pkt_rd(pkt)) << 8;
+    flags |= ((guint16)ldns_pkt_ra(pkt)) << 7;
+    flags |= ((guint16)ldns_pkt_ad(pkt)) << 5;
+    flags |= ((guint16)ldns_pkt_cd(pkt)) << 4;
+    flags |= (guint16)ldns_pkt_get_rcode(pkt);
     
-    // Flags
-    header->flags = ((ptr[2] << 8) | ptr[3]);
+    header->flags = flags;
     
-    // Question count
-    header->qdcount = ((ptr[4] << 8) | ptr[5]);
-    
-    // Answer count
-    header->ancount = ((ptr[6] << 8) | ptr[7]);
-    
-    // Name server count
-    header->nscount = ((ptr[8] << 8) | ptr[9]);
-    
-    // Additional record count
-    header->arcount = ((ptr[10] << 8) | ptr[11]);
+    header->qdcount = ldns_pkt_qdcount(pkt);
+    header->ancount = ldns_pkt_ancount(pkt);
+    header->nscount = ldns_pkt_nscount(pkt);
+    header->arcount = ldns_pkt_arcount(pkt);
 
-    // Skip to question section
-    ptr += sizeof(DnsHeader);
-
-    // Parse domain name
-    GString *domain = g_string_new("");
-
-    gsize bytes_remaining = len - sizeof(DnsHeader);
-    while (*ptr != '\0' && bytes_remaining > 0) {
-        guint8 len_byte = *(ptr++);
-        if (len_byte == 0 || bytes_remaining <= 1) break;
-        
-	if (bytes_remaining >= (gsize)(len_byte + 1)) {
-            g_string_append_len(domain, (const gchar*)ptr, len_byte);
-            g_string_append_c(domain, '.');
-        }
-        
-        bytes_remaining -= len_byte + 1;
-        ptr += len_byte;
-    }
-    // Remove trailing dot if present
-    if (domain->len > 0) {
-        domain->str[domain->len - 1] = '\0';
-    }
-
-    question->name = g_string_free(domain, FALSE);
-
-    // Parse QTYPE and QCLASS
-    if (bytes_remaining <= len) {
-        question->qtype = ((ptr[0] << 8) | ptr[1]);
-        question->qclass = ((ptr[2] << 8) | ptr[3]);
-    } else {
+    // Handle the first question
+    ldns_rr_list *questions = ldns_pkt_question(pkt);
+    if (ldns_rr_list_rr_count(questions) < 1) {
+        ldns_pkt_free(pkt);
         return FALSE;
     }
 
+    ldns_rr *first_q = ldns_rr_list_rr(questions, 0);
+    question->name = strdup(ldns_rdf2str(ldns_rr_owner(first_q)));
+    question->qtype = ldns_rr_get_type(first_q);
+    question->qclass = ldns_rr_get_class(first_q);
+
+    ldns_pkt_free(pkt);
     return TRUE;
 }
+
 
 guint8 *construct_dns_response(DnsHeader *header, 
                                     const DnsQuestion *question,
@@ -155,6 +142,7 @@ gboolean handle_incoming_message(GIOChannel *channel,
     // Parse DNS query
     DnsHeader header;
     DnsQuestion question;
+
     if (!parse_dns_query(buffer, bytes_read, &header, &question)) {
         g_print("Invalid DNS query format\n");
         return TRUE;

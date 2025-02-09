@@ -14,10 +14,10 @@ endif
 
 
 CC = gcc
-CFLAGS = -Wall -Wextra -g $(shell pkg-config --cflags gio-2.0)
-LDFLAGS = $(shell pkg-config --libs gio-2.0)
+CFLAGS = -Wall -Wextra -g $(shell pkg-config --cflags glib-2.0 gio-2.0 ldns)
+LDFLAGS = $(shell pkg-config --libs gio-2.0 ldns)
 
-VERSION ?= $(shell git describe --always)#? version
+VERSION ?= $(shell git describe --always) #? version
 
 SRCDIR = src
 OBJDIR = obj
