@@ -115,10 +115,24 @@ guint8 *construct_dns_response(DnsHeader *header,
 }
 
 
-gboolean handle_incoming_message(GIOChannel *channel,
-                                        GIOCondition condition,
-                                        gpointer user_data) {
-    g_print("Received connection attempt\n");
+guint8* construct_dns_response_with_addresses(GList *addresses, gsize *length) {
+    // Implementation for response with addresses
+    guint8 *response = g_malloc(512); // Allocate buffer for response
+    // ... implement DNS response construction ...
+    *length = 512; // Set actual length
+    return response;
+}
+
+guint8* construct_dns_response_no_records(guint16 id, gsize *length) {
+    // Implementation for no records response
+    guint8 *response = g_malloc(512); // Allocate buffer for response
+    // ... implement DNS response construction ...
+    *length = 512; // Set actual length
+    return response;
+}
+
+
+gboolean handle_incoming_message(GIOChannel *channel, GIOCondition condition, gpointer user_data) {
     if (condition & G_IO_HUP) {
         g_print("Connection closed\n");
         return FALSE;
@@ -127,44 +141,52 @@ gboolean handle_incoming_message(GIOChannel *channel,
     guint8 buffer[BUFFER_SIZE];
     gsize bytes_read;
     GError *error = NULL;
-    GSocket *socket = G_SOCKET(user_data);  // Get the socket from user_data
 
-    // Read incoming message
-    g_io_channel_read_chars(channel, (gchar*)buffer, BUFFER_SIZE,
-                           &bytes_read, &error);
-    
+    // Get the socket from user_data
+    GSocket *socket = G_SOCKET(user_data);
+
+    // Read raw bytes from socket
+    g_socket_receive(socket, (gchar*)buffer, BUFFER_SIZE, NULL, &error);
+
     if (error != NULL) {
         g_printerr("Error reading from socket: %s\n", error->message);
         g_error_free(error);
-        return TRUE;  // Continue watching
+        return TRUE;
     }
 
     // Parse DNS query
     DnsHeader header;
     DnsQuestion question;
-
     if (!parse_dns_query(buffer, bytes_read, &header, &question)) {
         g_print("Invalid DNS query format\n");
         return TRUE;
     }
 
-    g_print("Received DNS query for: %s\n", question.name);
-    g_print("QTYPE: %u, QCLASS: %u\n", g_ntohs(question.qtype), g_ntohs(question.qclass));
+    g_print("Resolving: %s\n", question.name);
 
-    // Construct response
-    gsize response_len;
-    guint8 *response = construct_dns_response(&header, &question, &response_len);
+    // Use GResolver to perform the actual resolution
+    GResolver *resolver = g_resolver_get_default();
+    GList *addresses = g_resolver_lookup_by_name(resolver, question.name,
+                                                NULL, &error);
 
-    // Send response using the socket directly
-    GError *send_error = NULL;
-    g_socket_send(socket, (gchar*)response, response_len, NULL, &send_error);
-    
-    if (send_error != NULL) {
-        g_printerr("Error sending response: %s\n", send_error->message);
-        g_error_free(send_error);
+    guint8 *response = NULL;
+    gsize response_len = 0;
+    if (addresses != NULL) {
+        response = construct_dns_response_with_addresses(addresses, &response_len);
+    } else {
+        response = construct_dns_response_no_records(header.id, &response_len);
+    }
+
+    // Send response
+    g_socket_send(socket, (gchar*)response, response_len, NULL, &error);
+
+    if (error != NULL) {
+        g_printerr("Error sending response: %s\n", error->message);
+        g_error_free(error);
     }
 
     g_free(response);
+    g_list_free_full(addresses, g_object_unref);
     g_free(question.name);
 
     return TRUE;

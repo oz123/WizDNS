@@ -22,7 +22,9 @@ typedef struct {
     guint16 qclass;
 } DnsQuestion;
 
-// Function declarations
+guint8* construct_dns_response_with_addresses(GList *addresses, gsize *length);
+guint8* construct_dns_response_no_records(guint16 id, gsize *length);
+
 gboolean handle_incoming_message(GIOChannel *channel,
                                GIOCondition condition,
                                gpointer user_data);
@@ -35,5 +37,6 @@ gboolean parse_dns_query(const guint8 *buffer,
                          gsize len,
                          DnsHeader *header,
                          DnsQuestion *question);
+
 
 #endif
