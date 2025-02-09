@@ -131,6 +131,7 @@ guint8 *construct_dns_response(DnsHeader *header,
 gboolean handle_incoming_message(GIOChannel *channel,
                                         GIOCondition condition,
                                         gpointer user_data) {
+    g_print("Received connection attempt\n");
     if (condition & G_IO_HUP) {
         g_print("Connection closed\n");
         return FALSE;

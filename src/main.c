@@ -16,15 +16,20 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include <gio/gio.h>
 #include <glib.h>
 #include <stdio.h>
 #include <string.h>
-
+#include <stdint.h>
 #include "handler.h"
 
 #define DNS_PORT 53
+
+static void print_usage(void) {
+    g_print("Usage: wizdns [-h <ip-address>] [-p <port>]\n");
+    g_print("\t-h <ip-address>: Bind to specific IPv4 address\n");
+    g_print("\t-p <port>: Listen on specified port (default: 53)\n");
+}
 
 int main(int argc, char **argv) {
     GSocket *socket;
@@ -32,12 +37,39 @@ int main(int argc, char **argv) {
     GError *error = NULL;
     GIOChannel *channel;
     guint io_watch_id;
+    GMainLoop *loop;
+
+    // Parse command-line arguments
+    gint opt;
+    gchar *bind_addr = NULL;
+    guint16 port = DNS_PORT;
+
+    while ((opt = getopt(argc, argv, "h:p:")) != -1) {
+        switch (opt) {
+            case 'h':
+                bind_addr = optarg;
+                break;
+            case 'p': {
+                guint64 parsed_port = g_ascii_strtoull(optarg, NULL, 10);
+                if (parsed_port > UINT16_MAX) {
+                    g_printerr("Invalid port number: %s\n", optarg);
+                    return 1;
+                }
+                port = (guint16)parsed_port;
+                break;
+            }
+            default:
+                print_usage();
+                return 1;
+        }
+    }
 
     // Create UDP socket
     socket = g_socket_new(G_SOCKET_FAMILY_IPV4,
                          G_SOCKET_TYPE_DATAGRAM,
                          G_SOCKET_PROTOCOL_UDP,
                          &error);
+
     if (error != NULL) {
         g_printerr("Could not create socket: %s\n", error->message);
         g_error_free(error);
@@ -45,8 +77,19 @@ int main(int argc, char **argv) {
     }
 
     // Create address to bind to
-    address = g_inet_socket_address_new(g_inet_address_new_any(G_SOCKET_FAMILY_IPV4),
-                                      DNS_PORT);
+    GInetAddress *inet_addr;
+    if (bind_addr) {
+        inet_addr = g_inet_address_new_from_string(bind_addr);
+        if (!inet_addr) {
+            g_printerr("Invalid IP address: %s\n", bind_addr);
+            g_object_unref(socket);
+            return 1;
+        }
+    } else {
+        inet_addr = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
+    }
+
+    address = g_inet_socket_address_new(inet_addr, port);
 
     // Bind the socket
     if (!g_socket_bind(socket, address, TRUE, &error)) {
@@ -54,10 +97,19 @@ int main(int argc, char **argv) {
         g_error_free(error);
         g_object_unref(socket);
         g_object_unref(address);
+        g_object_unref(inet_addr);
         return 1;
     }
 
     g_object_unref(address);
+    g_object_unref(inet_addr);
+
+    g_print("Starting WizDNS, listening on ");
+    if (bind_addr) {
+        g_print("%s:%u\n", bind_addr, port);
+    } else {
+        g_print("all interfaces port %u\n", port);
+    }
 
     // Get file descriptor and create IO channel
     channel = g_io_channel_unix_new(g_socket_get_fd(socket));
@@ -69,7 +121,7 @@ int main(int argc, char **argv) {
                                 socket);
 
     // Create and run main loop
-    GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+    loop = g_main_loop_new(NULL, FALSE);
     g_main_loop_run(loop);
 
     // Cleanup
