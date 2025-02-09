@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static gboolean parse_dns_query(const guint8 *buffer, gsize len,
+gboolean parse_dns_query(const guint8 *buffer, gsize len,
                               DnsHeader *header, DnsQuestion *question) {
     // Check minimum buffer size
     if (len < sizeof(DnsHeader)) {
@@ -35,18 +35,20 @@ static gboolean parse_dns_query(const guint8 *buffer, gsize len,
 
     // Parse domain name
     GString *domain = g_string_new("");
-    while (*ptr != '\0' && (ptr - buffer) < len) {
+
+    gsize bytes_remaining = len - sizeof(DnsHeader);
+    while (*ptr != '\0' && bytes_remaining > 0) {
         guint8 len_byte = *(ptr++);
-        if (len_byte == 0 || (ptr - buffer) >= len) break;
+        if (len_byte == 0 || bytes_remaining <= 1) break;
         
-        if (ptr - buffer + len_byte <= len) {
+	if (bytes_remaining >= (gsize)(len_byte + 1)) {
             g_string_append_len(domain, (const gchar*)ptr, len_byte);
             g_string_append_c(domain, '.');
         }
         
+        bytes_remaining -= len_byte + 1;
         ptr += len_byte;
     }
-
     // Remove trailing dot if present
     if (domain->len > 0) {
         domain->str[domain->len - 1] = '\0';
@@ -55,7 +57,7 @@ static gboolean parse_dns_query(const guint8 *buffer, gsize len,
     question->name = g_string_free(domain, FALSE);
 
     // Parse QTYPE and QCLASS
-    if ((ptr - buffer + 4) <= len) {
+    if (bytes_remaining <= len) {
         question->qtype = ((ptr[0] << 8) | ptr[1]);
         question->qclass = ((ptr[2] << 8) | ptr[3]);
     } else {
@@ -65,7 +67,7 @@ static gboolean parse_dns_query(const guint8 *buffer, gsize len,
     return TRUE;
 }
 
-static guint8 *construct_dns_response(DnsHeader *header, 
+guint8 *construct_dns_response(DnsHeader *header, 
                                     const DnsQuestion *question,
                                     gsize *response_len) {
     guint8 *response = g_malloc(sizeof(DnsHeader));

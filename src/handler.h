@@ -27,13 +27,13 @@ gboolean handle_incoming_message(GIOChannel *channel,
                                GIOCondition condition,
                                gpointer user_data);
 
-static guint8 *construct_dns_response(DnsHeader *header, 
-                                    const DnsQuestion *question,
-                                    gsize *response_len);
+guint8 *construct_dns_response(DnsHeader *header, 
+                               const DnsQuestion *question,
+                               gsize *response_len);
 
-static gboolean parse_dns_query(const guint8 *buffer, 
-                              gsize len,
-                              DnsHeader *header, 
-                              DnsQuestion *question);
+gboolean parse_dns_query(const guint8 *buffer, 
+                         gsize len,
+                         DnsHeader *header,
+                         DnsQuestion *question);
 
 #endif
