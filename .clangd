@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - "-isystem/usr/include/glib-2.0"
+    - "-isystem/usr/lib64/glib-2.0/include"  # if needed
+    - "-isystem/usr/include/gio-unix-2.0"       # if you use GIO Unix functionality
+    - "-isystem/usr/include/ldns"
+    - "-isystem/usr/lib64/libffi/include"       # based on your make's pkg-config output
+    - "-pthread"
+    - "-DGIO_COMPILATION"
+  Compiler: gcc
