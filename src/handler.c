@@ -56,77 +56,59 @@ gboolean parse_dns_query(const guint8 *buffer, gsize len, DnsHeader *header,
   return TRUE;
 }
 
-guint8 *construct_dns_response(DnsHeader *header, const DnsQuestion *question,
-                               gsize *response_len) {
-  guint8 *response = g_malloc(sizeof(DnsHeader));
-  guint8 *ptr = response;
+guint8 *construct_dns_response(DnsHeader *header, 
+                               DnsQuestion *question,
+                               gsize *response_len) 
+{
+    // Step 1: Create ldns structures for the DNS packet and question
+    ldns_pkt *response_pkt = ldns_pkt_new();
+    ldns_rr *question_rr = ldns_rr_new();
 
-  // Copy ID
-  ptr[0] = (header->id >> 8) & 0xFF;
-  ptr[1] = header->id & 0xFF;
+    // Step 2: Set the question name, type and class in the question RR
+    ldns_rdf *question_name_rdf = ldns_dname_new_frm_str(question->name);
+    ldns_rr_set_owner(question_rr, question_name_rdf);
+    ldns_rr_set_type(question_rr, question->qtype);
+    ldns_rr_set_class(question_rr, question->qclass);
 
-  // Set response flags (QR=1, RA=1)
-  ptr[2] = 0x80; // QR=1 (response), OPCODE=0000, AA=1, TC=0, RD=1
-  ptr[3] = 0x80; // RA=1 (recursion available)
+    // Step 3: Set header fields and add question section to packet 
+    ldns_pkt_set_id(response_pkt, header->id);
+    ldns_pkt_set_qr(response_pkt, 1);
+    ldns_pkt_set_aa(response_pkt, 1);
+    ldns_pkt_set_qdcount(response_pkt, 1);
+    ldns_pkt_push_rr(response_pkt, LDNS_SECTION_QUESTION, question_rr);
 
-  // Copy counts
-  ptr += 2;
-  memcpy(ptr, &header->qdcount, sizeof(guint16));
-  ptr += 2;
-  memcpy(ptr, &header->ancount, sizeof(guint16));
-  ptr += 2;
-  memcpy(ptr, &header->nscount, sizeof(guint16));
-  ptr += 2;
-  memcpy(ptr, &header->arcount, sizeof(guint16));
+    // Step 4: Add answer, authority and additional sections as needed
+    // This will depend on the specific response required
+    // Use ldns_pkt_push_rr to add RRs to the different sections
+    ldns_rr *answer_a_rr = ldns_rr_new();
+    ldns_rdf *answer_name_rdf = ldns_dname_new_frm_str("somehost.domain.tld");
+    ldns_rr_set_owner(answer_a_rr, answer_name_rdf);
+    ldns_rr_set_type(answer_a_rr, LDNS_RR_TYPE_A);
+    ldns_rr_set_class(answer_a_rr, LDNS_RR_CLASS_IN);
+    ldns_rr_set_ttl(answer_a_rr, 3600);
 
-  // Add domain name
-  gchar **labels = g_strsplit(question->name, ".", -1);
-  for (gint i = 0; labels[i]; i++) {
-    guint8 len = strlen(labels[i]);
-    *ptr++ = len;
-    memcpy(ptr, labels[i], len);
-    ptr += len;
-  }
-  g_strfreev(labels);
-  *ptr++ = '\0';
+    ldns_rdf *ip_rdf = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_A, "123.29.293.12");
+    ldns_rr_push_rdf(answer_a_rr, ip_rdf);
 
-  // Add question section
-  memcpy(ptr, &question->qtype, sizeof(guint16));
-  ptr += 2;
-  memcpy(ptr, &question->qclass, sizeof(guint16));
+    ldns_pkt_push_rr(response_pkt, LDNS_SECTION_ANSWER, answer_a_rr);
+    ldns_pkt_set_ancount(response_pkt, 1);
 
-  // Add answer section (simple A record response)
-  *response_len = ptr - response;
-  response = g_realloc(response, *response_len + 12);
-  ptr = response + (*response_len);
+    // Step 6: Convert packet to wire format
+    guint8 *response_wire = NULL; 
+    ldns_status status = ldns_pkt2wire(&response_wire, response_pkt, response_len);
+    
+    if (status != LDNS_STATUS_OK) {
+        // Handle error
+        *response_len = 0;
+        return NULL;  
+    }
 
-  // Type (A record)
-  ptr[0] = '\0';
-  ptr[1] = '\1';
-  // Class (IN)
-  ptr[2] = '\0';
-  ptr[3] = '\1';
-  // TTL (3600 seconds)
-  ptr[4] = '\0';
-  ptr[5] = '\x70';
-  ptr[6] = '\0';
-  ptr[7] = '\x80';
-  // RDLENGTH (4 bytes for IPv4)
-  ptr[8] = '\0';
-  ptr[9] = '\4';
-  // IPv4 address (example: 127.0.0.1)
-  ptr[10] = '\127';
-  ptr[11] = '\0';
+    // Step 7: Clean up
+    ldns_pkt_free(response_pkt);
+    ldns_rr_free(question_rr);
+    ldns_rr_free(answer_a_rr);
 
-  return response;
-}
-
-guint8 *construct_dns_response_with_addresses(GList *addresses, gsize *length) {
-  // Implementation for response with addresses
-  guint8 *response = g_malloc(512); // Allocate buffer for response
-  // ... implement DNS response construction ...
-  *length = 512; // Set actual length
-  return response;
+    return response_wire;
 }
 
 guint8 *construct_dns_response_no_records(guint16 id, gsize *length) {
@@ -136,6 +118,7 @@ guint8 *construct_dns_response_no_records(guint16 id, gsize *length) {
   *length = 512; // Set actual length
   return response;
 }
+ 
 
 gboolean handle_incoming_message(GIOChannel *channel, GIOCondition condition,
                                  gpointer user_data) {
@@ -169,20 +152,10 @@ gboolean handle_incoming_message(GIOChannel *channel, GIOCondition condition,
   }
 
   g_print("Resolving: %s\n", question.name);
-
-  // Use GResolver to perform the actual resolution
-  GResolver *resolver = g_resolver_get_default();
-  GList *addresses =
-      g_resolver_lookup_by_name(resolver, question.name, NULL, &error);
-
   guint8 *response = NULL;
   gsize response_len = 0;
-  if (addresses != NULL) {
-    response = construct_dns_response_with_addresses(addresses, &response_len);
-  } else {
-    response = construct_dns_response_no_records(header.id, &response_len);
-  }
 
+  response = construct_dns_response(&header, &question, &response_len);
   // Send response
   g_socket_send(socket, (gchar *)response, response_len, NULL, &error);
 
@@ -192,7 +165,6 @@ gboolean handle_incoming_message(GIOChannel *channel, GIOCondition condition,
   }
 
   g_free(response);
-  g_list_free_full(addresses, g_object_unref);
   g_free(question.name);
 
   return TRUE;

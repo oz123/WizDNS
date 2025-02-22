@@ -29,8 +29,8 @@ gboolean handle_incoming_message(GIOChannel *channel,
                                GIOCondition condition,
                                gpointer user_data);
 
-guint8 *construct_dns_response(DnsHeader *header, 
-                               const DnsQuestion *question,
+guint8 *construct_dns_response(DnsHeader *header,
+                               DnsQuestion *question,
                                gsize *response_len);
 
 gboolean parse_dns_query(const guint8 *buffer, 
